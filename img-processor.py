@@ -3,7 +3,6 @@ from PIL import Image
 import io
 import zipfile
 import py7zr
-import rarfile
 import os
 
 # --- Logic Functions ---
@@ -60,10 +59,10 @@ def process_single_image(file_bytes, width, height, logo_bytes, opacity, target_
     processed_buffer = resize_and_compress_to_buffer(img, target_size_kb, final_fmt)
     return processed_buffer, final_fmt
 
-# --- Universal Extractor Helper ---
+# --- Universal Extractor Helper (No RAR) ---
 def extract_files_from_archive(uploaded_archive):
     """
-    Generator that yields (filename, file_bytes) from Zip, 7z, or Rar.
+    Generator that yields (filename, file_bytes) from Zip or 7z.
     """
     filename = uploaded_archive.name.lower()
     uploaded_archive.seek(0)
@@ -79,27 +78,11 @@ def extract_files_from_archive(uploaded_archive):
     # 2. Handle 7Z
     elif filename.endswith(".7z"):
         with py7zr.SevenZipFile(uploaded_archive, 'r') as z:
-            # py7zr extraction is a bit different, readall returns dict
             all_files = z.readall()
             if all_files:
                 for name, data in all_files.items():
                     if name.lower().endswith(('.png', '.jpg', '.jpeg', '.webp')):
                         yield name, data
-
-    # 3. Handle RAR
-    elif filename.endswith(".rar"):
-        # Create a temp file because rarfile often needs a real file path or seeks
-        # Note: 'unrar' must be installed on the system
-        try:
-            with rarfile.RarFile(uploaded_archive) as z:
-                for name in z.namelist():
-                    if name.lower().endswith(('.png', '.jpg', '.jpeg', '.webp')):
-                        with z.open(name) as f:
-                            yield name, io.BytesIO(f.read())
-        except rarfile.RarExecError:
-             st.error("System Error: 'unrar' is not installed on this server. RAR files cannot be processed.")
-        except Exception as e:
-             st.error(f"RAR Error: {e}")
 
 # --- UI Setup ---
 st.set_page_config(page_title="Image Processor - Baka Digital", page_icon="🎨")
@@ -108,7 +91,7 @@ st.caption("Developed by Baka Digital")
 
 with st.sidebar:
     st.header("⚙️ Configuration")
-    mode = st.radio("Processing Mode", ["Single File", "Batch (Zip/Rar/7z)"])
+    mode = st.radio("Processing Mode", ["Single File", "Batch (Zip/7z)"])
     st.markdown("---")
     width = st.number_input("Width (pixels)", min_value=1, value=800)
     height = st.number_input("Height (pixels)", min_value=1, value=600)
@@ -143,10 +126,9 @@ if mode == "Single File":
 
 else: # Batch Mode
     st.subheader("Batch Archive Mode")
-    st.info("Supported formats: **.ZIP, .RAR, .7Z**")
+    st.info("Supported formats: **.ZIP, .7Z**")
     
-    # We accept all archive types here
-    uploaded_archive = st.file_uploader("Upload Archive", type=["zip", "rar", "7z"])
+    uploaded_archive = st.file_uploader("Upload Archive", type=["zip", "7z"])
     
     if st.button("Process Batch", type="primary"):
         if uploaded_archive:
@@ -158,10 +140,7 @@ else: # Batch Mode
                 # We always output a ZIP file for compatibility
                 with zipfile.ZipFile(output_zip_buffer, 'w', zipfile.ZIP_DEFLATED) as z_out:
                     
-                    # Gather files using our universal extractor
                     files_generator = extract_files_from_archive(uploaded_archive)
-                    
-                    # Convert generator to list to count progress
                     files_to_process = list(files_generator)
                     total_files = len(files_to_process)
                     
@@ -176,7 +155,6 @@ else: # Batch Mode
                                     file_bytes, width, height, logo_bytes, opacity, target_size_kb, image_format
                                 )
                                 
-                                # Reconstruct path for output ZIP
                                 original_path, original_name = os.path.split(filename)
                                 name_no_ext = original_name.rsplit('.', 1)[0]
                                 new_filename = f"{name_no_ext}.{final_fmt}"
