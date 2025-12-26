@@ -1,4 +1,2 @@
 streamlit
 Pillow
-py7zr
-rarfile
